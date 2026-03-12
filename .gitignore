@@ -1,0 +1,23 @@
+# Data files
+data/
+*.csv
+*.xlsx
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Local environment
+.env
+.venv
+env/
+venv/
+venv_ipl/
+
+# IDE/System
+.vscode/
+.idea/
+.DS_Store
+*.txt
