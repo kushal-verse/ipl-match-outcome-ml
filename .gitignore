@@ -1,7 +1,8 @@
 # Data files
-data/
 *.csv
 *.xlsx
+!Data/IPL_without_selected_columns.csv
+Data/IPL.csv
 
 # Python bytecode
 __pycache__/
