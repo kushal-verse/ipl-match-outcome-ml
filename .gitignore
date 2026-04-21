@@ -4,6 +4,10 @@
 !Data/IPL_without_selected_columns.csv
 !Data/IPL.csv
 
+# Model artifacts — regenerated on first run via joblib
+*.pkl
+*_version.txt
+
 # Python bytecode
 __pycache__/
 *.pyc
@@ -21,4 +25,3 @@ venv_ipl/
 .vscode/
 .idea/
 .DS_Store
-*.txt

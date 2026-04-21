@@ -3,9 +3,11 @@ import pandas as pd
 import numpy as np
 import joblib
 import matplotlib.pyplot as plt
-from sklearn.svm import SVC
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import (
+    accuracy_score, classification_report,
+    confusion_matrix, log_loss,
+)
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -50,7 +52,6 @@ HOME_GROUNDS = {
 }
 
 # Explicit numeric feature schema — must stay in sync with data_preprocessing.py.
-# Any column added/removed here must also be added/removed there, then MODEL_VERSION bumped.
 FEATURE_COLS = [
     'season', 'innings', 'over', 'runs_target', 'runs_left',
     'balls_left', 'crr', 'required_rr', 'wickets_remaining',
@@ -60,10 +61,9 @@ FEATURE_COLS = [
 CATEGORICAL_COLS = ['batting_team', 'bowling_team', 'venue', 'toss_winner', 'toss_decision']
 
 PREPROCESSED_CSV = 'Data/IPL_preprocessed.csv'
-MODEL_PATH       = 'Data/ipl_svm_model.pkl'
-SCALER_PATH      = 'Data/ipl_svm_scaler.pkl'
-COLUMNS_PATH     = 'Data/ipl_svm_columns.pkl'
-VERSION_PATH     = 'Data/ipl_svm_version.txt'
+MODEL_PATH       = 'Data/ipl_rf_model.pkl'
+COLUMNS_PATH     = 'Data/ipl_rf_columns.pkl'
+VERSION_PATH     = 'Data/ipl_rf_version.txt'
 
 # ─── Input Helpers ────────────────────────────────────────────────────────────
 
@@ -124,169 +124,175 @@ def prompt_int(prompt, min_val=None, max_val=None):
         except ValueError:
             print("  [!] Please enter a whole number.")
 
-# ─── Evaluation (shared — runs after training AND after loading) ───────────────
-
-def evaluate_and_display(model, scaler, trained_columns, show_chart):
-    """Run model evaluation on the 2024+ test set and display metrics.
-    show_chart=True saves and shows the 4-panel analysis PNG (training only)."""
-
-    df         = pd.read_csv(PREPROCESSED_CSV)
-    df_encoded = pd.get_dummies(df, columns=CATEGORICAL_COLS, drop_first=True)
-
-    X      = df_encoded.drop(columns=['batting_team_win'])
-    y      = df_encoded['batting_team_win']
-    X_test = X[df['season'] >= 2024]
-    y_test = y[df['season'] >= 2024]
-
-    # Align test columns to training schema before scaling
-    X_test_aligned = X_test.reindex(columns=trained_columns, fill_value=0)
-    X_test_scaled  = scaler.transform(X_test_aligned)
-
-    threshold    = 0.5
-    y_pred_proba = model.predict_proba(X_test_scaled)[:, 1]
-    y_pred       = (y_pred_proba >= threshold).astype(int)
-
-    accuracy     = accuracy_score(y_test, y_pred)
-    conf_matrix  = confusion_matrix(y_test, y_pred)
-    class_report = classification_report(y_test, y_pred, target_names=['Loss', 'Win'])
-
-    print("-" * 55)
-    print("   IPL LIVE MATCH WIN PROBABILITY PREDICTOR")
-    print("   Powered by SVM (RBF Kernel)")
-    print("-" * 55)
-    print(f"\n--- MODEL EVALUATION (Test Set — 2024+) ---\n")
-    print(f"  Accuracy : {accuracy:.4f}\n")
-    print("  Confusion Matrix:")
-    print(conf_matrix)
-    print("\n  Classification Report:")
-    print(class_report)
-    print("-" * 55)
-
-    if not show_chart:
-        return
-
-    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
-    fig.suptitle('IPL SVM Model Analysis', fontsize=14, fontweight='bold')
-
-    # ── Subplot 1: Confusion Matrix ──
-    ax1 = axes[0, 0]
-    im1 = ax1.imshow(conf_matrix, cmap='YlOrRd', aspect='auto')
-    ax1.set_title('Confusion Matrix', fontweight='bold', fontsize=12)
-    ax1.set_xlabel('Predicted'); ax1.set_ylabel('Actual')
-    ax1.set_xticks([0, 1]); ax1.set_yticks([0, 1])
-    ax1.set_xticklabels(['Loss', 'Win']); ax1.set_yticklabels(['Loss', 'Win'])
-    for i in range(2):
-        for j in range(2):
-            color = 'black' if conf_matrix[i, j] < conf_matrix.max() / 2 else 'white'
-            ax1.text(j, i, str(conf_matrix[i, j]),
-                     ha='center', va='center', color=color, fontsize=14, fontweight='bold')
-    plt.colorbar(im1, ax=ax1)
-
-    # ── Subplot 2: Precision & Recall ──
-    ax2 = axes[0, 1]
-    tn, fp, fn, tp = conf_matrix.ravel()
-    metrics_labels = ['Loss\nPrecision', 'Loss\nRecall', 'Win\nPrecision', 'Win\nRecall']
-    metrics_values = [
-        tn / (tn + fn) if (tn + fn) else 0,
-        tn / (tn + fp) if (tn + fp) else 0,
-        tp / (tp + fp) if (tp + fp) else 0,
-        tp / (tp + fn) if (tp + fn) else 0,
-    ]
-    colors = ['#e74c3c', '#e74c3c', '#2ecc71', '#2ecc71']
-    bars = ax2.bar(metrics_labels, metrics_values, color=colors, alpha=0.7, edgecolor='black', linewidth=2)
-    ax2.set_ylabel('Score', fontweight='bold')
-    ax2.set_title('Precision & Recall by Class', fontweight='bold', fontsize=12)
-    ax2.set_ylim([0, 1])
-    for bar, val in zip(bars, metrics_values):
-        ax2.text(bar.get_x() + bar.get_width() / 2., bar.get_height(),
-                 f'{val:.3f}', ha='center', va='bottom', fontweight='bold')
-
-    # ── Subplot 3: Actual vs Predicted Distribution ──
-    ax3 = axes[1, 0]
-    x_pos = np.arange(2); width = 0.35
-    ax3.bar(x_pos - width / 2, [(y_test == 0).sum(), (y_test == 1).sum()],
-            width, label='Actual',    color='#3498db', alpha=0.7, edgecolor='black')
-    ax3.bar(x_pos + width / 2, [(y_pred == 0).sum(), (y_pred == 1).sum()],
-            width, label='Predicted', color='#f39c12', alpha=0.7, edgecolor='black')
-    ax3.set_ylabel('Count', fontweight='bold')
-    ax3.set_title('Actual vs Predicted Distribution', fontweight='bold', fontsize=12)
-    ax3.set_xticks(x_pos); ax3.set_xticklabels(['Loss', 'Win'])
-    ax3.legend(); ax3.grid(axis='y', alpha=0.3)
-
-    # ── Subplot 4: Predicted Probability Distribution ──
-    # Replaces pie chart — shows how confident the model is across all test predictions.
-    ax4 = axes[1, 1]
-    ax4.hist(y_pred_proba[y_test == 0], bins=30, alpha=0.6, color='#e74c3c',
-             label='Actual Loss', edgecolor='black', linewidth=0.5)
-    ax4.hist(y_pred_proba[y_test == 1], bins=30, alpha=0.6, color='#2ecc71',
-             label='Actual Win',  edgecolor='black', linewidth=0.5)
-    ax4.axvline(x=0.5, color='black', linestyle='--', linewidth=1.5, label='Threshold (0.5)')
-    ax4.set_xlabel('Predicted Win Probability', fontweight='bold')
-    ax4.set_ylabel('Count', fontweight='bold')
-    ax4.set_title('Predicted Probability Distribution', fontweight='bold', fontsize=12)
-    ax4.legend()
-
-    plt.tight_layout()
-    plt.savefig('Data/model_analysis.png', dpi=100, bbox_inches='tight')
-    print("[✓] Chart saved → Data/model_analysis.png")
-    plt.show()
-    print("-" * 55)
-
 # ─── Train or Load Model ──────────────────────────────────────────────────────
 
-artifacts_exist = all(os.path.exists(p) for p in [MODEL_PATH, SCALER_PATH, COLUMNS_PATH])
+# No StandardScaler needed — Random Forest is invariant to feature scale
+# (it splits on thresholds, not distances, so magnitude differences don't matter).
+
+artifacts_exist = all(os.path.exists(p) for p in [MODEL_PATH, COLUMNS_PATH])
 saved_version   = open(VERSION_PATH).read().strip() if os.path.exists(VERSION_PATH) else None
 version_ok      = (saved_version == MODEL_VERSION)
 
 if artifacts_exist and version_ok:
-    print(f"[✓] Loading saved model v{MODEL_VERSION} from disk…")
+    print(f"[✓] Loading saved RF model v{MODEL_VERSION} from disk…")
     model           = joblib.load(MODEL_PATH)
-    scaler          = joblib.load(SCALER_PATH)
     trained_columns = joblib.load(COLUMNS_PATH)
-    print("[✓] Model loaded.\n")
-    evaluate_and_display(model, scaler, trained_columns, show_chart=False)
+    print("[✓] Model loaded. Skipping retraining.\n")
+    df         = pd.read_csv(PREPROCESSED_CSV)
+    df_encoded = pd.get_dummies(df, columns=CATEGORICAL_COLS, drop_first=True)
+    X = df_encoded.drop(columns=['batting_team_win'])
+    y = df_encoded['batting_team_win']
 else:
     if artifacts_exist and not version_ok:
-        print(f"[!] Model version mismatch (saved: v{saved_version} → current: v{MODEL_VERSION}) — retraining…\n")
+        print(f"[!] Version mismatch (saved: v{saved_version} → current: v{MODEL_VERSION}) — retraining…\n")
     else:
-        print("[!] No saved model found — training now (this may take a while)…\n")
+        print("[!] No saved model found — training now (this should take 1–3 minutes)…\n")
 
     df         = pd.read_csv(PREPROCESSED_CSV)
     df_encoded = pd.get_dummies(df, columns=CATEGORICAL_COLS, drop_first=True)
-
     X = df_encoded.drop(columns=['batting_team_win'])
     y = df_encoded['batting_team_win']
 
-    # Temporal split — train on pre-2024, test on 2024+ to avoid data leakage
-    train_mask = df['season'] < 2024
+    # Temporal split — train on pre-2024, test on 2024+ to avoid data leakage.
+    # Random split is wrong here: future games would inform past predictions.
+    train_mask       = df['season'] < 2024
     X_train, y_train = X[train_mask], y[train_mask]
+    trained_columns  = X_train.columns.tolist()
 
-    # Scale features (required for SVM)
-    scaler         = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    trained_columns = X_train.columns.tolist()
-
-    # Verify FEATURE_COLS are present in training schema — catch drift early
+    # Verify feature schema is intact — catch preprocessing drift early.
     missing = [c for c in FEATURE_COLS if c not in trained_columns]
     if missing:
-        raise ValueError(f"[✗] Feature schema mismatch — missing from training data: {missing}\n"
-                         "    Re-run data_preprocessing.py to regenerate the CSV.")
+        raise ValueError(
+            f"[✗] Feature schema mismatch — missing from training data: {missing}\n"
+            "    Re-run data_preprocessing.py to regenerate the CSV."
+        )
 
-    model = SVC(kernel='rbf', probability=True, C=1.0, random_state=42)
-    model.fit(X_train_scaled, y_train)
+    # ── Random Forest Hyperparameters ──────────────────────────────────────────
+    # n_estimators=300   : 300 trees give stable probability estimates.
+    # max_depth=20       : limits tree depth to prevent memorising training data.
+    # min_samples_leaf=10: each leaf needs ≥10 samples — smooths probabilities.
+    # class_weight=balanced: compensates for any Loss/Win imbalance automatically.
+    # n_jobs=-1          : use all CPU cores for parallel tree building.
+    model = RandomForestClassifier(
+        n_estimators    = 300,
+        max_depth       = 20,
+        min_samples_leaf= 10,
+        class_weight    = 'balanced',
+        random_state    = 42,
+        n_jobs          = -1,
+    )
+    model.fit(X_train, y_train)
 
     joblib.dump(model,           MODEL_PATH)
-    joblib.dump(scaler,          SCALER_PATH)
     joblib.dump(trained_columns, COLUMNS_PATH)
     with open(VERSION_PATH, 'w') as f:
         f.write(MODEL_VERSION)
     print(f"[✓] Model v{MODEL_VERSION} saved to {MODEL_PATH}\n")
 
-    evaluate_and_display(model, scaler, trained_columns, show_chart=True)
+# ─── Evaluate ─────────────────────────────────────────────────────────────────
 
-# ─── Load valid venues from training data ─────────────────────────────────────
-# Done after model load so PREPROCESSED_CSV is always available at this point.
-_df_venues  = pd.read_csv(PREPROCESSED_CSV, usecols=['venue'])
+test_mask = df['season'] >= 2024
+X_test    = X[test_mask]
+y_test    = y[test_mask]
+
+# Align test columns to training schema — handles any OHE columns absent in test.
+X_test_aligned = X_test.reindex(columns=trained_columns, fill_value=0)
+
+threshold    = 0.5
+y_pred_proba = model.predict_proba(X_test_aligned)[:, 1]
+y_pred       = (y_pred_proba >= threshold).astype(int)
+
+accuracy     = accuracy_score(y_test, y_pred)
+logloss      = log_loss(y_test, y_pred_proba)
+conf_matrix  = confusion_matrix(y_test, y_pred)
+class_report = classification_report(y_test, y_pred, target_names=['Loss', 'Win'])
+
+print("-" * 55)
+print("   IPL LIVE MATCH WIN PROBABILITY PREDICTOR")
+print("   Powered by Random Forest")
+print("-" * 55)
+print(f"\n--- MODEL EVALUATION (Test Set — 2024+) ---\n")
+print(f"  Accuracy : {accuracy:.4f}")
+print(f"  Log Loss : {logloss:.4f}   ← lower is better; 0.0 = perfect\n")
+print("  Confusion Matrix:")
+print(conf_matrix)
+print("\n  Classification Report:")
+print(class_report)
+print("-" * 55)
+
+# ─── Analysis Chart ───────────────────────────────────────────────────────────
+
+fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+fig.suptitle('IPL Random Forest Model Analysis', fontsize=14, fontweight='bold')
+
+# ── Subplot 1: Confusion Matrix ──────────────────────────────────────────────
+ax1 = axes[0, 0]
+im1 = ax1.imshow(conf_matrix, cmap='YlOrRd', aspect='auto')
+ax1.set_title('Confusion Matrix', fontweight='bold', fontsize=12)
+ax1.set_xlabel('Predicted'); ax1.set_ylabel('Actual')
+ax1.set_xticks([0, 1]); ax1.set_yticks([0, 1])
+ax1.set_xticklabels(['Loss', 'Win']); ax1.set_yticklabels(['Loss', 'Win'])
+for i in range(2):
+    for j in range(2):
+        color = 'black' if conf_matrix[i, j] < conf_matrix.max() / 2 else 'white'
+        ax1.text(j, i, str(conf_matrix[i, j]),
+                 ha='center', va='center', color=color, fontsize=14, fontweight='bold')
+plt.colorbar(im1, ax=ax1)
+
+# ── Subplot 2: Precision & Recall ────────────────────────────────────────────
+ax2 = axes[0, 1]
+tn, fp, fn, tp = conf_matrix.ravel()
+metrics_labels = ['Loss\nPrecision', 'Loss\nRecall', 'Win\nPrecision', 'Win\nRecall']
+metrics_values = [
+    tn / (tn + fn) if (tn + fn) else 0,
+    tn / (tn + fp) if (tn + fp) else 0,
+    tp / (tp + fp) if (tp + fp) else 0,
+    tp / (tp + fn) if (tp + fn) else 0,
+]
+colors = ['#e74c3c', '#e74c3c', '#2ecc71', '#2ecc71']
+bars = ax2.bar(metrics_labels, metrics_values, color=colors, alpha=0.7, edgecolor='black', linewidth=2)
+ax2.set_ylabel('Score', fontweight='bold')
+ax2.set_title('Precision & Recall by Class', fontweight='bold', fontsize=12)
+ax2.set_ylim([0, 1])
+for bar, val in zip(bars, metrics_values):
+    ax2.text(bar.get_x() + bar.get_width() / 2., bar.get_height(),
+             f'{val:.3f}', ha='center', va='bottom', fontweight='bold')
+
+# ── Subplot 3: Actual vs Predicted Distribution ───────────────────────────────
+ax3 = axes[1, 0]
+x_pos = np.arange(2); width = 0.35
+ax3.bar(x_pos - width / 2, [(y_test == 0).sum(), (y_test == 1).sum()],
+        width, label='Actual',    color='#3498db', alpha=0.7, edgecolor='black')
+ax3.bar(x_pos + width / 2, [(y_pred == 0).sum(), (y_pred == 1).sum()],
+        width, label='Predicted', color='#f39c12', alpha=0.7, edgecolor='black')
+ax3.set_ylabel('Count', fontweight='bold')
+ax3.set_title('Actual vs Predicted Distribution', fontweight='bold', fontsize=12)
+ax3.set_xticks(x_pos); ax3.set_xticklabels(['Loss', 'Win'])
+ax3.legend(); ax3.grid(axis='y', alpha=0.3)
+
+# ── Subplot 4: Top 15 Feature Importances (RF-specific) ──────────────────────
+# Feature importance = mean reduction in Gini impurity across all trees.
+# Higher = the model relies on that feature more to make decisions.
+ax4 = axes[1, 1]
+importances = pd.Series(model.feature_importances_, index=trained_columns)
+top15       = importances.nlargest(15).sort_values()
+colors_fi   = ['#2ecc71' if i in ['runs_left', 'balls_left', 'crr',
+                                    'required_rr', 'pressure_index',
+                                    'wickets_remaining']
+               else '#3498db' for i in top15.index]
+top15.plot(kind='barh', ax=ax4, color=colors_fi, edgecolor='black', linewidth=0.8)
+ax4.set_title('Top 15 Feature Importances', fontweight='bold', fontsize=12)
+ax4.set_xlabel('Mean Gini Impurity Reduction', fontweight='bold')
+ax4.grid(axis='x', alpha=0.3)
+
+plt.tight_layout()
+plt.savefig('Data/rf_analysis.png', dpi=100, bbox_inches='tight')
+print("[✓] Chart saved → Data/rf_analysis.png")
+plt.show()
+print("-" * 55)
+
+# ─── Load Valid Venues from Training Data ──────────────────────────────────────
+_df_venues   = pd.read_csv(PREPROCESSED_CSV, usecols=['venue'])
 VALID_VENUES = _df_venues['venue'].dropna().unique().tolist()
 
 # ─── Match Setup ──────────────────────────────────────────────────────────────
@@ -319,7 +325,7 @@ for over in range(20):
     wickets_this_over = prompt_int(f"  Wickets fallen in over {over + 1} : ", min_val=0, max_val=10)
 
     total_runs_scored += runs_this_over
-    # Cap at 10 — innings ends the ball the 10th wicket falls
+    # Cap at 10 — innings ends the ball the 10th wicket falls.
     total_wickets = min(10, total_wickets + wickets_this_over)
 
     balls_bowled      = (over + 1) * 6
@@ -332,11 +338,6 @@ for over in range(20):
     required_rr    = (runs_left / (balls_left / 6)) if balls_left > 0 else 0.0
     pressure_index = required_rr - crr
 
-    # ── Check match end BEFORE computing/displaying probability ───────────────
-    # Avoids printing a meaningless probability when balls_left=0 or target is already crossed.
-    match_won  = total_runs_scored >= runs_target
-    match_lost = total_wickets >= 10
-
     print(f"\n  Match State:")
     print(f"    Score             : {total_runs_scored}/{total_wickets}")
     print(f"    Wickets Remaining : {wickets_remaining}")
@@ -345,14 +346,16 @@ for over in range(20):
     print(f"    Pressure Index    : {pressure_index:.2f} "
           f"({'Under pressure' if pressure_index > 0 else 'Ahead of target'})")
 
-    if match_won:
+    # Check end conditions BEFORE computing probability — avoids meaningless
+    # output when balls_left=0 or target is already crossed.
+    if total_runs_scored >= runs_target:
         print(f"\n  {batting_team} won the match!")
         break
-    if match_lost:
+    if total_wickets >= 10:
         print(f"\n  {bowling_team} won the match! ({batting_team} all out)")
         break
 
-    # Build input row — `over` is 0-indexed, consistent with training data convention
+    # Build inference row — `over` is 0-indexed, matching training data convention.
     input_data = {
         'season'           : season,
         'innings'          : 2,          # This predictor is 2nd-innings only
@@ -373,11 +376,11 @@ for over in range(20):
         f'toss_decision_{toss_decision}': 1,
     }
 
-    input_df     = pd.DataFrame([input_data])
-    input_df     = input_df.reindex(columns=trained_columns, fill_value=0)
-    input_scaled = scaler.transform(input_df)
+    input_df = pd.DataFrame([input_data])
+    # reindex fills any OHE columns missing from this input with 0
+    input_df = input_df.reindex(columns=trained_columns, fill_value=0)
 
-    win_prob  = model.predict_proba(input_scaled)[0][1]
+    win_prob  = model.predict_proba(input_df)[0][1]
     lose_prob = 1.0 - win_prob
 
     win_probabilities.append(win_prob * 100)
@@ -409,7 +412,7 @@ else:
 print("-" * 55)
 
 # ─── Post-Match: Win Probability Trend ────────────────────────────────────────
-# Only shown if we collected any probabilities (match didn't end in over 1).
+# Only shown if we collected probabilities (match lasted more than 1 over).
 if len(win_probabilities) > 1:
     fig, ax = plt.subplots(figsize=(10, 5))
     ax.plot(over_numbers, win_probabilities, marker='o', color='#2ecc71',
@@ -423,13 +426,13 @@ if len(win_probabilities) > 1:
                     alpha=0.15, color='#e74c3c')
     ax.set_xlabel('Over', fontweight='bold')
     ax.set_ylabel('Win Probability (%)', fontweight='bold')
-    ax.set_title(f'{batting_team} vs {bowling_team} — Win Probability Trend',
+    ax.set_title(f'{batting_team} vs {bowling_team} — Win Probability Trend (RF)',
                  fontweight='bold', fontsize=13)
     ax.set_ylim([0, 100])
     ax.set_xticks(over_numbers)
     ax.legend()
     ax.grid(alpha=0.3)
     plt.tight_layout()
-    plt.savefig('Data/win_probability_trend.png', dpi=100, bbox_inches='tight')
-    print("[✓] Trend chart saved → Data/win_probability_trend.png")
+    plt.savefig('Data/rf_win_probability_trend.png', dpi=100, bbox_inches='tight')
+    print("[✓] Trend chart saved → Data/rf_win_probability_trend.png")
     plt.show()

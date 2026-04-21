@@ -1,43 +1,102 @@
+import os
 import pandas as pd
 import numpy as np
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+import joblib
 import matplotlib.pyplot as plt
-df = pd.read_csv("Data/IPL_preprocessed.csv")
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+
+# ─── Artifact Paths ───────────────────────────────────────────────────────────
+# Bump MODEL_VERSION whenever features or training logic change.
+MODEL_VERSION    = "2.0"
+PREPROCESSED_CSV = 'Data/IPL_preprocessed.csv'
+MODEL_PATH       = 'Data/ipl_lr_model.pkl'
+SCALER_PATH      = 'Data/ipl_lr_scaler.pkl'
+COLUMNS_PATH     = 'Data/ipl_lr_columns.pkl'
+VERSION_PATH     = 'Data/ipl_lr_version.txt'
 categorical_cols = ['batting_team', 'bowling_team', 'venue', 'toss_winner', 'toss_decision']
-df_encoded = pd.get_dummies(df, columns=categorical_cols, drop_first=True)
-X = df_encoded.drop(columns=['batting_team_win'])
-Y = df_encoded['batting_team_win']
-train_mask = df['season'] < 2024
-X_train = X[train_mask]
-Y_train = Y[train_mask]
-model = LogisticRegression(solver='lbfgs', max_iter=200, class_weight='balanced')
-model.fit(X_train, Y_train)
-trained_columns = X_train.columns.tolist()
+
+# ─── Train or Load ────────────────────────────────────────────────────────────
+artifacts_exist = all(os.path.exists(p) for p in [MODEL_PATH, SCALER_PATH, COLUMNS_PATH])
+saved_version   = open(VERSION_PATH).read().strip() if os.path.exists(VERSION_PATH) else None
+version_ok      = (saved_version == MODEL_VERSION)
+
+if artifacts_exist and version_ok:
+    print(f"[✓] Loading saved LR model v{MODEL_VERSION} from disk…")
+    model           = joblib.load(MODEL_PATH)
+    scaler          = joblib.load(SCALER_PATH)
+    trained_columns = joblib.load(COLUMNS_PATH)
+    print("[✓] Model loaded. Skipping retraining.\n")
+    # Still need df for evaluation and venue list
+    df         = pd.read_csv(PREPROCESSED_CSV)
+    df_encoded = pd.get_dummies(df, columns=categorical_cols, drop_first=True)
+    X = df_encoded.drop(columns=['batting_team_win'])
+    Y = df_encoded['batting_team_win']
+else:
+    if artifacts_exist and not version_ok:
+        print(f"[!] Version mismatch (saved: v{saved_version} → current: v{MODEL_VERSION}) — retraining…\n")
+    else:
+        print("[!] No saved model — training now…\n")
+
+    df         = pd.read_csv(PREPROCESSED_CSV)
+    df_encoded = pd.get_dummies(df, columns=categorical_cols, drop_first=True)
+    X = df_encoded.drop(columns=['batting_team_win'])
+    Y = df_encoded['batting_team_win']
+
+    train_mask      = df['season'] < 2024
+    X_train, Y_train = X[train_mask], Y[train_mask]
+
+    # Scale features — fixes ConvergenceWarning by normalising feature magnitudes
+    scaler          = StandardScaler()
+    X_train_scaled  = scaler.fit_transform(X_train)
+    trained_columns = X_train.columns.tolist()
+
+    model = LogisticRegression(solver='lbfgs', max_iter=1000, class_weight='balanced')
+    model.fit(X_train_scaled, Y_train)
+
+    joblib.dump(model,           MODEL_PATH)
+    joblib.dump(scaler,          SCALER_PATH)
+    joblib.dump(trained_columns, COLUMNS_PATH)
+    with open(VERSION_PATH, 'w') as f:
+        f.write(MODEL_VERSION)
+    print(f"[✓] Model v{MODEL_VERSION} saved to {MODEL_PATH}\n")
+
+trained_columns = trained_columns  # available in both branches
+# ─── Evaluate ────────────────────────────────────────────────────────────────
 test_mask = df['season'] >= 2024
-X_test = X[test_mask]
-Y_test = Y[test_mask]
-Y_pred_proba = model.predict_proba(X_test)[:, 1]
-threshold = 0.5
-Y_pred = (Y_pred_proba >= threshold).astype(int)
-Y_pred_default = model.predict(X_test)
-accuracy = accuracy_score(Y_test, Y_pred)
-conf_matrix = confusion_matrix(Y_test, Y_pred)
+X_test    = X[test_mask]
+Y_test    = Y[test_mask]
+
+# Align + scale test set using the fitted scaler
+X_test_aligned = X_test.reindex(columns=trained_columns, fill_value=0)
+X_test_scaled  = scaler.transform(X_test_aligned)
+
+threshold    = 0.5
+Y_pred_proba = model.predict_proba(X_test_scaled)[:, 1]
+Y_pred       = (Y_pred_proba >= threshold).astype(int)
+accuracy     = accuracy_score(Y_test, Y_pred)
+conf_matrix  = confusion_matrix(Y_test, Y_pred)
 class_report = classification_report(Y_test, Y_pred, target_names=['Loss', 'Win'])
 print("-" * 55)
 print("   IPL LIVE MATCH WIN PROBABILITY PREDICTOR")
 print("   Powered by Logistic Regression")
 print("-" * 55)
-y_prob = model.predict_proba(X_test)
-y_hat = y_prob[0]
+# ─── Gradient Demo (first test sample — pedagogical illustration) ────────────
+# Shows the cross-entropy gradient for one arbitrary sample from the test set.
+# gradient = predicted_proba - one_hot(true_label), i.e. the error signal
+# that logistic regression minimises during training via lbfgs.
+y_prob     = model.predict_proba(X_test_scaled)
+y_hat      = y_prob[0]
 true_label = Y_test.iloc[0]
-y_onehot = np.zeros(2)
+y_onehot   = np.zeros(2)
 y_onehot[true_label] = 1
-gradient = y_hat - y_onehot
-print(f"\n--- GRADIENT (Single Sample) ---\n")
-print(f"Predicted probabilities: {y_hat}")
-print(f"True label (one-hot): {y_onehot}")
-print(f"Gradient (error signal): {gradient}")
+gradient   = y_hat - y_onehot
+print(f"\n--- GRADIENT (Single Test Sample) ---\n")
+print(f"  Predicted probabilities : {y_hat}")
+print(f"  True label (one-hot)    : {y_onehot}")
+print(f"  Gradient (error signal) : {gradient}")
+print(f"  Interpretation: model was {'correct' if np.argmax(y_hat) == true_label else 'wrong'} on this sample")
 print(f"\n--- MODEL EVALUATION ---\n")
 print(f"Accuracy: {accuracy:.4f}\n")
 print("Confusion Matrix:")
@@ -173,25 +232,31 @@ for over in range(20):
         f'toss_winner_{toss_winner}'    : 1,
         f'toss_decision_{toss_decision}': 1,
     }
-    input_df = pd.DataFrame([input_data])
-    input_df = input_df.reindex(columns=trained_columns, fill_value=0)
-    win_prob  = model.predict_proba(input_df)[0][1]
-    lose_prob = 1 - win_prob
-    win_probabilities.append(win_prob * 100)
-    over_numbers.append(over + 1)
+    input_df     = pd.DataFrame([input_data])
+    input_df     = input_df.reindex(columns=trained_columns, fill_value=0)
+    input_scaled = scaler.transform(input_df)
+    win_prob     = model.predict_proba(input_scaled)[0][1]
+    lose_prob    = 1 - win_prob
+
     print(f"\n  Match State:")
     print(f"    Score         : {total_runs_scored}/{total_wickets}")
-    print(f"    Runs Left     : {runs_left}  |  Balls Left : {balls_left}")
+    print(f"    Runs Left     : {max(0, runs_left)}  |  Balls Left : {balls_left}")
     print(f"    CRR           : {crr:.2f}    |  RRR        : {required_rr:.2f}")
-    print(f"\n  Win Probability:")
-    print(f"    {batting_team:<35} : {win_prob*100:.1f}%")
-    print(f"    {bowling_team:<35} : {lose_prob*100:.1f}%")
+
+    # Check end conditions BEFORE printing probability — avoids meaningless output
+    # when balls_left=0 or target is already crossed.
     if runs_left <= 0:
         print(f"\n  {batting_team} won the match!")
         break
     if total_wickets >= 10:
         print(f"\n  {bowling_team} won the match! {batting_team} all out.")
         break
+
+    win_probabilities.append(win_prob * 100)
+    over_numbers.append(over + 1)
+    print(f"\n  Win Probability:")
+    print(f"    {batting_team:<35} : {win_prob*100:.1f}%")
+    print(f"    {bowling_team:<35} : {lose_prob*100:.1f}%")
 print("\n" + "-" * 55)
 print("   MATCH SUMMARY")
 print("-" * 55)
