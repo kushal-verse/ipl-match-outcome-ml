@@ -11,7 +11,7 @@ from sklearn.metrics import accuracy_score, classification_report, confusion_mat
 
 # Bump MODEL_VERSION whenever features or training logic change.
 # A version mismatch forces a retrain — prevents silently loading a stale model.
-MODEL_VERSION = "2.0"
+MODEL_VERSION = "2.1"
 
 TEAMS = sorted([
     'Chennai Super Kings',
@@ -55,6 +55,8 @@ FEATURE_COLS = [
     'season', 'innings', 'over', 'runs_target', 'runs_left',
     'balls_left', 'crr', 'required_rr', 'wickets_remaining',
     'pressure_index', 'home_advantage', 'toss_advantage',
+    'run_rate_ratio', 'balls_left_squared', 'wickets_run_rate_interaction',
+    'boundary_pressure', 'over_pressure',
 ]
 
 CATEGORICAL_COLS = ['batting_team', 'bowling_team', 'venue', 'toss_winner', 'toss_decision']
@@ -332,6 +334,13 @@ for over in range(20):
     required_rr    = (runs_left / (balls_left / 6)) if balls_left > 0 else 0.0
     pressure_index = required_rr - crr
 
+    # Derived interaction features — must match data_preprocessing.py exactly.
+    run_rate_ratio               = crr / required_rr if required_rr > 0 else 1.0
+    balls_left_squared           = balls_left ** 2
+    wickets_run_rate_interaction = wickets_remaining * crr
+    boundary_pressure            = runs_left / wickets_remaining if wickets_remaining > 0 else float(runs_left)
+    over_pressure                = pressure_index * (over / 20)
+
     # ── Check match end BEFORE computing/displaying probability ───────────────
     # Avoids printing a meaningless probability when balls_left=0 or target is already crossed.
     match_won  = total_runs_scored >= runs_target
@@ -374,6 +383,11 @@ for over in range(20):
         f'venue_{venue}'                : 1,
         f'toss_winner_{toss_winner}'    : 1,
         f'toss_decision_{toss_decision}': 1,
+        'run_rate_ratio'              : run_rate_ratio,
+        'balls_left_squared'          : balls_left_squared,
+        'wickets_run_rate_interaction': wickets_run_rate_interaction,
+        'boundary_pressure'           : boundary_pressure,
+        'over_pressure'               : over_pressure,
     }
 
     input_df     = pd.DataFrame([input_data])

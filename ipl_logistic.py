@@ -9,7 +9,7 @@ from sklearn.metrics import accuracy_score, classification_report, confusion_mat
 
 # ─── Artifact Paths ───────────────────────────────────────────────────────────
 # Bump MODEL_VERSION whenever features or training logic change.
-MODEL_VERSION    = "2.0"
+MODEL_VERSION    = "2.1"
 PREPROCESSED_CSV = 'Data/IPL_preprocessed.csv'
 MODEL_PATH       = 'Data/ipl_lr_model.pkl'
 SCALER_PATH      = 'Data/ipl_lr_scaler.pkl'
@@ -213,6 +213,13 @@ for over in range(20):
     required_rr = (runs_left / (balls_left / 6)) if balls_left > 0 else 0.0
     wickets_remaining = 10 - total_wickets
     pressure_index = required_rr - crr
+
+    # Derived interaction features — must match data_preprocessing.py exactly.
+    run_rate_ratio               = crr / required_rr if required_rr > 0 else 1.0
+    balls_left_squared           = balls_left ** 2
+    wickets_run_rate_interaction = wickets_remaining * crr
+    boundary_pressure            = runs_left / wickets_remaining if wickets_remaining > 0 else float(runs_left)
+    over_pressure                = pressure_index * (over / 20)
     input_data = {
         'season'        : season,
         'innings'       : 2,
@@ -231,6 +238,11 @@ for over in range(20):
         f'venue_{venue}'                : 1,
         f'toss_winner_{toss_winner}'    : 1,
         f'toss_decision_{toss_decision}': 1,
+        'run_rate_ratio'              : run_rate_ratio,
+        'balls_left_squared'          : balls_left_squared,
+        'wickets_run_rate_interaction': wickets_run_rate_interaction,
+        'boundary_pressure'           : boundary_pressure,
+        'over_pressure'               : over_pressure,
     }
     input_df     = pd.DataFrame([input_data])
     input_df     = input_df.reindex(columns=trained_columns, fill_value=0)

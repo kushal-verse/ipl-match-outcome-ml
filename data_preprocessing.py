@@ -34,6 +34,10 @@ NUMERIC_FEATURES = [
     'season', 'innings', 'over', 'runs_target', 'runs_left',
     'balls_left', 'crr', 'required_rr', 'wickets_remaining',
     'pressure_index', 'home_advantage', 'toss_advantage',
+    # Derived interaction features — encode non-linear relationships explicitly
+    # so that the linear model (LR) can exploit them without polynomial expansion.
+    'run_rate_ratio', 'balls_left_squared', 'wickets_run_rate_interaction',
+    'boundary_pressure', 'over_pressure',
 ]
 
 CATEGORICAL_FEATURES = ['batting_team', 'bowling_team', 'venue', 'toss_winner', 'toss_decision']
@@ -135,10 +139,44 @@ innings_2['required_rr'] = innings_2.apply(
 # Pressure index: positive = under pressure, negative = ahead of target
 innings_2['pressure_index'] = innings_2['required_rr'] - innings_2['crr']
 
+# ── Derived Interaction Features ────────────────────────────────────────────
+# These hand-craft non-linear combinations so that linear models (LR) can use
+# them directly. Tree models (RF, XGBoost) benefit too via sharper splits.
+
+# crr / required_rr: normalised rate ratio. >1 means ahead, <1 means behind.
+# More informative to LR than the raw difference (pressure_index) alone.
+innings_2['run_rate_ratio'] = innings_2.apply(
+    lambda row: row['crr'] / row['required_rr'] if row['required_rr'] > 0 else 1.0,
+    axis=1
+)
+
+# balls_left ** 2: death-over pressure increases non-linearly.
+# Squaring captures the accelerating cost of each remaining ball at the end.
+innings_2['balls_left_squared'] = innings_2['balls_left'] ** 2
+
+# wickets_remaining * crr: encodes batting team having resources AND scoring fast.
+# Two things that matter together, not separately.
+innings_2['wickets_run_rate_interaction'] = (
+    innings_2['wickets_remaining'] * innings_2['crr']
+)
+
+# runs_left / wickets_remaining: runs needed per remaining wicket.
+# Classic cricket resource metric. Guard: if all out, treat as runs_left itself.
+innings_2['boundary_pressure'] = innings_2.apply(
+    lambda row: row['runs_left'] / row['wickets_remaining']
+    if row['wickets_remaining'] > 0 else float(row['runs_left']),
+    axis=1
+)
+
+# pressure_index weighted by how late in the innings it occurs.
+# A pressure index of 3 in over 5 is very different from over 18.
+innings_2['over_pressure'] = innings_2['pressure_index'] * (innings_2['over'] / 20)
+
 print(f"\nEngineered features sample:")
 print(innings_2[['batting_team', 'over', 'runs_target', 'runs_left',
                  'balls_left', 'crr', 'required_rr',
-                 'wickets_remaining', 'pressure_index']].head(10).to_string())
+                 'wickets_remaining', 'pressure_index',
+                 'run_rate_ratio', 'boundary_pressure', 'over_pressure']].head(5).to_string())
 
 # ─── Select Final Feature Set ─────────────────────────────────────────────────
 model_features = NUMERIC_FEATURES + CATEGORICAL_FEATURES + [TARGET]  # defined above
