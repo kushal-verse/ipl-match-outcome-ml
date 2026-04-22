@@ -67,15 +67,18 @@ VERSION_PATH     = 'Data/ipl_rf_version.txt'
 
 # ─── Input Helpers ────────────────────────────────────────────────────────────
 
-def prompt_team(prompt, exclude=None):
+def prompt_team(prompt, exclude=None, valid_subset=None):
     """Prompt until user enters a valid canonical team name (case-insensitive).
-    exclude: optional team name to disallow (prevents batting == bowling team)."""
+    exclude     : team name to disallow (prevents batting == bowling team).
+    valid_subset: if provided, only these teams are accepted (e.g. toss winner
+                  must be one of the two playing teams, not any of the 15)."""
+    allowed = valid_subset if valid_subset else TEAMS
     while True:
         name  = input(prompt).strip()
-        match = next((t for t in TEAMS if t.lower() == name.lower()), None)
+        match = next((t for t in allowed if t.lower() == name.lower()), None)
         if not match:
             print("  [!] Unrecognised team. Valid options:")
-            for t in TEAMS:
+            for t in allowed:
                 print(f"        {t}")
             continue
         if exclude and match.lower() == exclude.lower():
@@ -138,7 +141,8 @@ if artifacts_exist and version_ok:
     model           = joblib.load(MODEL_PATH)
     trained_columns = joblib.load(COLUMNS_PATH)
     print("[✓] Model loaded. Skipping retraining.\n")
-    df         = pd.read_csv(PREPROCESSED_CSV)
+    # Load CSV once — reused for evaluation AND venue list below.
+    df = pd.read_csv(PREPROCESSED_CSV)
     df_encoded = pd.get_dummies(df, columns=CATEGORICAL_COLS, drop_first=True)
     X = df_encoded.drop(columns=['batting_team_win'])
     y = df_encoded['batting_team_win']
@@ -292,8 +296,8 @@ plt.show()
 print("-" * 55)
 
 # ─── Load Valid Venues from Training Data ──────────────────────────────────────
-_df_venues   = pd.read_csv(PREPROCESSED_CSV, usecols=['venue'])
-VALID_VENUES = _df_venues['venue'].dropna().unique().tolist()
+# df is already in memory from the train/load block above — no second CSV read.
+VALID_VENUES = df['venue'].dropna().unique().tolist()
 
 # ─── Match Setup ──────────────────────────────────────────────────────────────
 
@@ -301,7 +305,8 @@ print("\n--- ENTER MATCH DETAILS ---\n")
 batting_team  = prompt_team("Batting Team              : ")
 bowling_team  = prompt_team("Bowling Team              : ", exclude=batting_team)
 venue         = prompt_venue("Venue                     : ", VALID_VENUES)
-toss_winner   = prompt_team("Toss Winner               : ")
+# Toss winner must be one of the two playing teams — any other team is invalid.
+toss_winner   = prompt_team("Toss Winner               : ", valid_subset=[batting_team, bowling_team])
 toss_decision = prompt_str ("Toss Decision (bat/field) : ", valid=['bat', 'field'])
 season        = prompt_int ("Season (year)             : ", min_val=2007, max_val=2030)
 runs_target   = prompt_int ("Target Score              : ", min_val=1,    max_val=500)
@@ -346,13 +351,18 @@ for over in range(20):
     print(f"    Pressure Index    : {pressure_index:.2f} "
           f"({'Under pressure' if pressure_index > 0 else 'Ahead of target'})")
 
-    # Check end conditions BEFORE computing probability — avoids meaningless
-    # output when balls_left=0 or target is already crossed.
+    # Check all three end conditions BEFORE computing probability.
+    # 1. Target reached — batting team wins.
     if total_runs_scored >= runs_target:
         print(f"\n  {batting_team} won the match!")
         break
+    # 2. All out — bowling team wins.
     if total_wickets >= 10:
         print(f"\n  {bowling_team} won the match! ({batting_team} all out)")
+        break
+    # 3. Balls exhausted — bowling team wins (batting side ran out of deliveries).
+    if balls_left == 0:
+        print(f"\n  {bowling_team} won the match! ({batting_team} couldn't reach the target)")
         break
 
     # Build inference row — `over` is 0-indexed, matching training data convention.
