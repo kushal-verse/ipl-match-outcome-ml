@@ -52,12 +52,10 @@ else:
     X_train_scaled  = scaler.fit_transform(X_train)
     trained_columns = X_train.columns.tolist()
 
-    model = LogisticRegression(
-        solver       = 'lbfgs',
-        max_iter     = 2000,    # raised from 1000 — expanded feature set needs more iterations
-        tol          = 1e-4,    # convergence tolerance (sklearn default, explicit for clarity)
-        class_weight = 'balanced',
-    )
+    # max_iter=2000: the expanded 17-feature set (12 original + 5 derived)
+    # needs more iterations to converge. StandardScaler is already in place
+    # so lbfgs should reach the true optimum cleanly within this budget.
+    model = LogisticRegression(solver='lbfgs', max_iter=2000, class_weight='balanced')
     model.fit(X_train_scaled, Y_train)
 
     joblib.dump(model,           MODEL_PATH)
