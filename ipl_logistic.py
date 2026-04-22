@@ -270,6 +270,8 @@ if total_runs_scored >= runs_target:
     print(f"{batting_team} won!")
 elif total_wickets >= 10:
     print(f"{bowling_team} won! ({batting_team} all out)")
+elif balls_left == 0:
+    print(f"{bowling_team} won! ({batting_team} fell short by {runs_left} runs)")
 else:
     final_prob = win_probabilities[-1]
     if final_prob >= 50:
