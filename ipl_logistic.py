@@ -9,7 +9,7 @@ from sklearn.metrics import accuracy_score, classification_report, confusion_mat
 
 # ─── Artifact Paths ───────────────────────────────────────────────────────────
 # Bump MODEL_VERSION whenever features or training logic change.
-MODEL_VERSION    = "2.2"
+MODEL_VERSION    = "2.3"
 PREPROCESSED_CSV = 'Data/IPL_preprocessed.csv'
 MODEL_PATH       = 'Data/ipl_lr_model.pkl'
 SCALER_PATH      = 'Data/ipl_lr_scaler.pkl'
@@ -52,10 +52,11 @@ else:
     X_train_scaled  = scaler.fit_transform(X_train)
     trained_columns = X_train.columns.tolist()
 
-    # max_iter=2000: the expanded 17-feature set (12 original + 5 derived)
-    # needs more iterations to converge. StandardScaler is already in place
-    # so lbfgs should reach the true optimum cleanly within this budget.
-    model = LogisticRegression(solver='lbfgs', max_iter=2000, class_weight='balanced')
+    # C=0.5: grid search across C=[0.01, 0.1, 0.5, 1.0, 5.0, 10.0] on 2023 val set.
+    # C=0.5 gave the best validation accuracy (76.48%). C=0.01 had lower log-loss
+    # but significantly lower accuracy — too much regularisation for this feature set.
+    # max_iter=2000: expanded 17-feature set needs more iterations to converge.
+    model = LogisticRegression(solver='lbfgs', C=0.5, max_iter=2000, class_weight='balanced')
     model.fit(X_train_scaled, Y_train)
 
     joblib.dump(model,           MODEL_PATH)
