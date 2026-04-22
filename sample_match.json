@@ -1,0 +1,27 @@
+{
+  "batting_team": "Chennai Super Kings",
+  "bowling_team": "Mumbai Indians",
+  "venue": "Wankhede Stadium",
+  "toss_winner": "Chennai Super Kings",
+  "toss_decision": "bat",
+  "season": 2024,
+  "runs_target": 180,
+  "overs": [
+    {
+      "runs": 8,
+      "wickets": 0
+    },
+    {
+      "runs": 12,
+      "wickets": 0
+    },
+    {
+      "runs": 5,
+      "wickets": 1
+    },
+    {
+      "runs": 15,
+      "wickets": 0
+    }
+  ]
+}

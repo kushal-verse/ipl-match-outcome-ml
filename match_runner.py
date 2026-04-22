@@ -1,5 +1,9 @@
 import os
+import sys
+import json
 import pandas as pd
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from utils import (
     TEAMS, HOME_GROUNDS,
@@ -7,57 +11,14 @@ from utils import (
 )
 from models import ipl_lr, ipl_rf, ipl_xgb
 
-def main():
-    print("--- Training Models ---")
-    
-    models_info = {}
-    
-    try:
-        model_lr, cols_lr, scaler_lr = ipl_lr.train('Data/IPL_preprocessed.csv')
-        models_info['Logistic Regression'] = {
-            'module': ipl_lr,
-            'data': (model_lr, cols_lr, scaler_lr)
-        }
-    except Exception as e:
-        print(f"Could not train Logistic Regression: {e}")
-        
-    try:
-        model_rf, cols_rf, scaler_rf = ipl_rf.train('Data/IPL_preprocessed.csv')
-        models_info['Random Forest'] = {
-            'module': ipl_rf,
-            'data': (model_rf, cols_rf, scaler_rf)
-        }
-    except Exception as e:
-        print(f"Could not train Random Forest: {e}")
-        
-    try:
-        model_xgb, cols_xgb, scaler_xgb = ipl_xgb.train('Data/IPL_preprocessed.csv')
-        models_info['XGBoost'] = {
-            'module': ipl_xgb,
-            'data': (model_xgb, cols_xgb, scaler_xgb)
-        }
-    except Exception as e:
-        print(f"Could not train XGBoost: {e}")
-        
-    if not models_info:
-        print("\nNo models could be trained. Exiting.")
-        return
-        
-    print("\n--- ENTER MATCH DETAILS ---\n")
-    batting_team  = prompt_team("Batting Team              : ")
-    bowling_team  = prompt_team("Bowling Team              : ", exclude=batting_team)
-    
-    try:
-        df = pd.read_csv('Data/IPL_preprocessed.csv', usecols=['venue'])
-        VALID_VENUES = df['venue'].dropna().unique().tolist()
-    except Exception:
-        VALID_VENUES = list(set(HOME_GROUNDS.values()))
-        
-    venue         = prompt_venue("Venue                     : ", VALID_VENUES)
-    toss_winner   = prompt_team("Toss Winner               : ", valid_set=[batting_team, bowling_team])
-    toss_decision = prompt_str ("Toss Decision (bat/field) : ", valid=['bat', 'field'])
-    season        = prompt_int ("Season (year)             : ", min_val=2007, max_val=2030)
-    runs_target   = prompt_int ("Target Score              : ", min_val=1,    max_val=500)
+def run_simulation(models_info, match_meta, overs_data=None):
+    batting_team  = match_meta['batting_team']
+    bowling_team  = match_meta['bowling_team']
+    venue         = match_meta['venue']
+    toss_winner   = match_meta['toss_winner']
+    toss_decision = match_meta['toss_decision']
+    season        = match_meta['season']
+    runs_target   = match_meta['runs_target']
     
     home_advantage = 1 if HOME_GROUNDS.get(batting_team) == venue else 0
     toss_advantage = 1 if (toss_winner == batting_team and toss_decision == 'bat') else 0
@@ -74,8 +35,19 @@ def main():
     
     for over in range(20):
         print(f"\n     --- Over {over + 1} ---")
-        runs_this_over    = prompt_int(f"     Runs scored : ", min_val=0, max_val=36)
-        wickets_this_over = prompt_int(f"     Wickets     : ", min_val=0, max_val=10)
+        
+        if overs_data is not None:
+            if over < len(overs_data):
+                runs_this_over = overs_data[over].get('runs', 0)
+                wickets_this_over = overs_data[over].get('wickets', 0)
+                print(f"     Runs scored : {runs_this_over} (from file)")
+                print(f"     Wickets     : {wickets_this_over} (from file)")
+            else:
+                print("     [End of provided over data in file]")
+                break
+        else:
+            runs_this_over    = prompt_int(f"     Runs scored : ", min_val=0, max_val=36)
+            wickets_this_over = prompt_int(f"     Wickets     : ", min_val=0, max_val=10)
         
         total_runs_scored += runs_this_over
         total_wickets = min(10, total_wickets + wickets_this_over)
@@ -214,6 +186,106 @@ def main():
         plt.savefig('Data/runner_win_probability_trend.png', dpi=100, bbox_inches='tight')
         print("\nTrend chart saved → Data/runner_win_probability_trend.png")
         plt.close()
+
+def main():
+    print("--- Training Models ---")
+    
+    models_info = {}
+    
+    try:
+        model_lr, cols_lr, scaler_lr = ipl_lr.train('Data/IPL_preprocessed.csv')
+        models_info['Logistic Regression'] = {
+            'module': ipl_lr,
+            'data': (model_lr, cols_lr, scaler_lr)
+        }
+    except Exception as e:
+        print(f"Could not train Logistic Regression: {e}")
         
+    try:
+        model_rf, cols_rf, scaler_rf = ipl_rf.train('Data/IPL_preprocessed.csv')
+        models_info['Random Forest'] = {
+            'module': ipl_rf,
+            'data': (model_rf, cols_rf, scaler_rf)
+        }
+    except Exception as e:
+        print(f"Could not train Random Forest: {e}")
+        
+    try:
+        model_xgb, cols_xgb, scaler_xgb = ipl_xgb.train('Data/IPL_preprocessed.csv')
+        models_info['XGBoost'] = {
+            'module': ipl_xgb,
+            'data': (model_xgb, cols_xgb, scaler_xgb)
+        }
+    except Exception as e:
+        print(f"Could not train XGBoost: {e}")
+        
+    if not models_info:
+        print("\nNo models could be trained. Exiting.")
+        return
+        
+    print("\n--- CHOOSE MODE ---")
+    print("1. Interactive Live Match (Manual Input)")
+    print("2. Load Match from File (JSON File)")
+    
+    while True:
+        choice = input("Enter choice (1 or 2): ").strip()
+        if choice in ['1', '2']:
+            break
+        print("Invalid choice. Please enter 1 or 2.")
+        
+    if choice == '1':
+        print("\n--- ENTER MATCH DETAILS ---\n")
+        batting_team  = prompt_team("Batting Team              : ")
+        bowling_team  = prompt_team("Bowling Team              : ", exclude=batting_team)
+        
+        try:
+            df = pd.read_csv('Data/IPL_preprocessed.csv', usecols=['venue'])
+            VALID_VENUES = df['venue'].dropna().unique().tolist()
+        except Exception:
+            VALID_VENUES = list(set(HOME_GROUNDS.values()))
+            
+        venue         = prompt_venue("Venue                     : ", VALID_VENUES)
+        toss_winner   = prompt_team("Toss Winner               : ", valid_set=[batting_team, bowling_team])
+        toss_decision = prompt_str ("Toss Decision (bat/field) : ", valid=['bat', 'field'])
+        season        = prompt_int ("Season (year)             : ", min_val=2007, max_val=2030)
+        runs_target   = prompt_int ("Target Score              : ", min_val=1,    max_val=500)
+        
+        match_meta = {
+            'batting_team': batting_team,
+            'bowling_team': bowling_team,
+            'venue': venue,
+            'toss_winner': toss_winner,
+            'toss_decision': toss_decision,
+            'season': season,
+            'runs_target': runs_target
+        }
+        
+        run_simulation(models_info, match_meta, overs_data=None)
+        
+    elif choice == '2':
+        filepath = input("Enter path to JSON match file: ").strip()
+        if not os.path.exists(filepath):
+            print(f"File not found: {filepath}")
+            return
+            
+        try:
+            with open(filepath, 'r') as f:
+                file_data = json.load(f)
+                
+            match_meta = {
+                'batting_team': file_data['batting_team'],
+                'bowling_team': file_data['bowling_team'],
+                'venue': file_data['venue'],
+                'toss_winner': file_data['toss_winner'],
+                'toss_decision': file_data['toss_decision'],
+                'season': file_data['season'],
+                'runs_target': file_data['runs_target']
+            }
+            overs_data = file_data.get('overs', [])
+            
+            run_simulation(models_info, match_meta, overs_data=overs_data)
+        except Exception as e:
+            print(f"Error reading or parsing file: {e}")
+
 if __name__ == "__main__":
     main()
