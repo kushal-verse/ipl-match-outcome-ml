@@ -251,6 +251,9 @@ for over in range(20):
     if total_wickets >= 10:
         print(f"\n  {bowling_team} won the match! {batting_team} all out.")
         break
+    if balls_left == 0:
+        print(f"\n  Innings complete — {bowling_team} won! ({batting_team} fell short)")
+        break
 
     win_probabilities.append(win_prob * 100)
     over_numbers.append(over + 1)

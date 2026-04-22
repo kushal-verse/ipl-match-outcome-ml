@@ -351,6 +351,9 @@ for over in range(20):
     if match_lost:
         print(f"\n  {bowling_team} won the match! ({batting_team} all out)")
         break
+    if balls_left == 0:
+        print(f"\n  Innings complete — {bowling_team} won! ({batting_team} fell short)")
+        break
 
     # Build input row — `over` is 0-indexed, consistent with training data convention
     input_data = {
