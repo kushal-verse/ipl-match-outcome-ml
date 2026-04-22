@@ -28,7 +28,7 @@ def train(preprocessed_csv):
     )
     model.fit(X_train, Y_train)
 
-    print(f"[✓] Random Forest trained")
+    print(f"Random Forest trained")
 
     test_mask = df['season'] >= 2024
     X_test    = X[test_mask]
@@ -117,7 +117,7 @@ def train(preprocessed_csv):
 
     plt.tight_layout()
     plt.savefig('Data/rf_analysis.png', dpi=100, bbox_inches='tight')
-    print("[✓] Chart saved → Data/rf_analysis.png")
+    print("Chart saved → Data/rf_analysis.png")
     plt.close()
     
     return model, trained_columns, None

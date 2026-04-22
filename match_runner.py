@@ -19,7 +19,7 @@ def main():
             'data': (model_lr, cols_lr, scaler_lr)
         }
     except Exception as e:
-        print(f"[!] Could not train Logistic Regression: {e}")
+        print(f"Could not train Logistic Regression: {e}")
         
     try:
         model_rf, cols_rf, scaler_rf = ipl_rf.train('Data/IPL_preprocessed.csv')
@@ -28,7 +28,7 @@ def main():
             'data': (model_rf, cols_rf, scaler_rf)
         }
     except Exception as e:
-        print(f"[!] Could not train Random Forest: {e}")
+        print(f"Could not train Random Forest: {e}")
         
     try:
         model_xgb, cols_xgb, scaler_xgb = ipl_xgb.train('Data/IPL_preprocessed.csv')
@@ -37,10 +37,10 @@ def main():
             'data': (model_xgb, cols_xgb, scaler_xgb)
         }
     except Exception as e:
-        print(f"[!] Could not train XGBoost: {e}")
+        print(f"Could not train XGBoost: {e}")
         
     if not models_info:
-        print("\n[!] No models could be trained. Exiting.")
+        print("\nNo models could be trained. Exiting.")
         return
         
     print("\n--- ENTER MATCH DETAILS ---\n")
@@ -212,7 +212,7 @@ def main():
         ax.grid(alpha=0.3)
         plt.tight_layout()
         plt.savefig('Data/runner_win_probability_trend.png', dpi=100, bbox_inches='tight')
-        print("\n[✓] Trend chart saved → Data/runner_win_probability_trend.png")
+        print("\nTrend chart saved → Data/runner_win_probability_trend.png")
         plt.close()
         
 if __name__ == "__main__":

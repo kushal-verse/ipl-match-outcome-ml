@@ -41,12 +41,12 @@ def prompt_team(prompt, exclude=None, valid_set=None):
         match = next((t for t in pool if t.lower() == name.lower()), None)
         if not match:
             label = "Valid options" if not valid_set else "Must be one of the playing teams"
-            print(f"  [!] Unrecognised team. {label}:")
+            print(f"  Unrecognised team. {label}:")
             for t in pool:
                 print(f"        {t}")
             continue
         if exclude and match.lower() == exclude.lower():
-            print(f"  [!] Cannot be the same as the other team ({exclude}).")
+            print(f"  Cannot be the same as the other team ({exclude}).")
             continue
         return match
 
@@ -54,12 +54,12 @@ def prompt_venue(prompt, valid_venues):
     while True:
         value = input(prompt).strip()
         if not value:
-            print("  [!] Input cannot be empty.")
+            print("  Input cannot be empty.")
             continue
         match = next((v for v in valid_venues if v.lower() == value.lower()), None)
         if match:
             return match
-        print("  [!] Unrecognised venue. Known venues:")
+        print("  Unrecognised venue. Known venues:")
         for v in sorted(valid_venues):
             print(f"        {v}")
 
@@ -67,10 +67,10 @@ def prompt_str(prompt, valid=None):
     while True:
         value = input(prompt).strip()
         if not value:
-            print("  [!] Input cannot be empty.")
+            print("  Input cannot be empty.")
             continue
         if valid and value.lower() not in [v.lower() for v in valid]:
-            print(f"  [!] Must be one of: {valid}")
+            print(f"  Must be one of: {valid}")
             continue
         return value
 
@@ -79,11 +79,11 @@ def prompt_int(prompt, min_val=None, max_val=None):
         try:
             value = int(input(prompt).strip())
             if min_val is not None and value < min_val:
-                print(f"  [!] Must be >= {min_val}.")
+                print(f"  Must be >= {min_val}.")
                 continue
             if max_val is not None and value > max_val:
-                print(f"  [!] Must be <= {max_val}.")
+                print(f"  Must be <= {max_val}.")
                 continue
             return value
         except ValueError:
-            print("  [!] Please enter a whole number.")
+            print("  Please enter a whole number.")

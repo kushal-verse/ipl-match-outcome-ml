@@ -2,7 +2,7 @@
 
 Machine learning project to predict IPL match outcomes during live play using historical match data, team statistics, and an ensemble of advanced algorithms. The project seamlessly trains models on-the-fly to deliver over-by-over win probability updates.
 
-## Project Architecture ✅ COMPLETE
+## Project Architecture COMPLETE
 
 ### Core Components
 1. **Data Pipeline** (`data_preprocessing.py`)

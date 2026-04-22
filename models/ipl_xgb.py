@@ -48,7 +48,7 @@ def train(preprocessed_csv):
         verbose=False,
     )
 
-    print(f"[✓] XGBoost trained")
+    print(f"XGBoost trained")
 
     test_mask = df['season'] >= 2024
     X_test    = X[test_mask]
@@ -137,7 +137,7 @@ def train(preprocessed_csv):
 
     plt.tight_layout()
     plt.savefig('Data/xgb_analysis.png', dpi=100, bbox_inches='tight')
-    print("[✓] Chart saved → Data/xgb_analysis.png")
+    print("Chart saved → Data/xgb_analysis.png")
     plt.close()
     
     return model, trained_columns, None
