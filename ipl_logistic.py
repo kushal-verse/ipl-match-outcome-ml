@@ -9,7 +9,7 @@ from sklearn.metrics import accuracy_score, classification_report, confusion_mat
 
 # ─── Artifact Paths ───────────────────────────────────────────────────────────
 # Bump MODEL_VERSION whenever features or training logic change.
-MODEL_VERSION    = "2.1"
+MODEL_VERSION    = "2.2"
 PREPROCESSED_CSV = 'Data/IPL_preprocessed.csv'
 MODEL_PATH       = 'Data/ipl_lr_model.pkl'
 SCALER_PATH      = 'Data/ipl_lr_scaler.pkl'
@@ -52,7 +52,12 @@ else:
     X_train_scaled  = scaler.fit_transform(X_train)
     trained_columns = X_train.columns.tolist()
 
-    model = LogisticRegression(solver='lbfgs', max_iter=1000, class_weight='balanced')
+    model = LogisticRegression(
+        solver       = 'lbfgs',
+        max_iter     = 2000,    # raised from 1000 — expanded feature set needs more iterations
+        tol          = 1e-4,    # convergence tolerance (sklearn default, explicit for clarity)
+        class_weight = 'balanced',
+    )
     model.fit(X_train_scaled, Y_train)
 
     joblib.dump(model,           MODEL_PATH)
