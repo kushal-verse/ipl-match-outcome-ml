@@ -13,7 +13,7 @@ from sklearn.metrics import (
 
 # Bump MODEL_VERSION whenever features or training logic change.
 # A version mismatch forces a retrain — prevents silently loading a stale model.
-MODEL_VERSION = "2.0"
+MODEL_VERSION = "2.1"
 
 TEAMS = sorted([
     'Chennai Super Kings',
@@ -171,6 +171,19 @@ else:
             "    Re-run data_preprocessing.py to regenerate the CSV."
         )
 
+    # ── Validation split for early stopping ────────────────────────────────────
+    # Use 2023 season as a held-out validation set (most recent pre-2024 data).
+    # This must NOT be the test set (2024+) — that would leak future information.
+    # Early stopping monitors validation log-loss and halts training when it
+    # stops improving, preventing later boosting rounds from overfitting.
+    val_mask                 = df.loc[train_mask.values, 'season'] == 2023
+    X_val, y_val             = X_train[val_mask.values], y_train[val_mask.values]
+    X_train_fit, y_train_fit = X_train[~val_mask.values], y_train[~val_mask.values]
+
+    print(f"  Train rows : {len(X_train_fit):,}  (pre-2023)")
+    print(f"  Val rows   : {len(X_val):,}  (2023 only — for early stopping)")
+    print(f"  Test rows  : {(df['season'] >= 2024).sum():,}  (2024+ — held out)\n")
+
     # ── XGBoost Hyperparameters ────────────────────────────────────────────────
     #
     # How XGBoost differs from Random Forest:
@@ -179,8 +192,8 @@ else:
     #   on the errors the previous ensemble got wrong, using gradient descent
     #   on the log-loss objective to decide where to split.
     #
-    # n_estimators=500   : 500 boosting rounds. More rounds = more capacity,
-    #                      but early_stopping or learning_rate keeps it in check.
+    # n_estimators=500   : max boosting rounds. early_stopping_rounds=50 will
+    #                      halt training before this if val loss plateaus.
     # max_depth=8        : shallower than RF (20) because boosting compensates
     #                      with sequential correction — deep trees overfit faster.
     # learning_rate=0.05 : each tree contributes only 5% of its prediction.
@@ -197,9 +210,10 @@ else:
     #                      imbalance the same way class_weight='balanced' does in RF.
     # eval_metric='logloss': optimise for probability calibration, not just accuracy.
     # tree_method='hist'  : histogram-based splitting — much faster on large datasets.
+    # early_stopping_rounds=50: stop if val log-loss hasn't improved in 50 rounds.
 
-    neg_count = (y_train == 0).sum()
-    pos_count = (y_train == 1).sum()
+    neg_count = (y_train_fit == 0).sum()
+    pos_count = (y_train_fit == 1).sum()
 
     model = XGBClassifier(
         n_estimators      = 500,
@@ -211,11 +225,19 @@ else:
         scale_pos_weight  = neg_count / pos_count,
         eval_metric       = 'logloss',
         tree_method       = 'hist',
+        early_stopping_rounds = 50,
         random_state      = 42,
         n_jobs            = -1,
         verbosity         = 0,
     )
-    model.fit(X_train, y_train)
+    model.fit(
+        X_train_fit, y_train_fit,
+        eval_set=[(X_val, y_val)],
+        verbose=False,
+    )
+
+    best_round = model.best_iteration
+    print(f"  Early stopping: best round = {best_round} / 500")
 
     joblib.dump(model,           MODEL_PATH)
     joblib.dump(trained_columns, COLUMNS_PATH)
